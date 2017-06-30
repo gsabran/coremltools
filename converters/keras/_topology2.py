@@ -1,29 +1,23 @@
-# Copyright (c) 2017, Apple Inc. All rights reserved.
-#
-# Use of this source code is governed by a BSD-3-clause license that can be
-# found in the LICENSE.txt file or at https://opensource.org/licenses/BSD-3-Clause
-
 import keras as _keras
 import numpy as _np
 
 _KERAS_LAYERS_1D = [
-    _keras.layers.Convolution1D, 
-    _keras.layers.UpSampling1D, 
-    _keras.layers.ZeroPadding1D, 
-    _keras.layers.Cropping1D, 
-    _keras.layers.MaxPooling1D, 
-    _keras.layers.AveragePooling1D, 
-    _keras.layers.GlobalMaxPooling1D, 
+    _keras.layers.Conv1D,
+    _keras.layers.UpSampling1D,
+    _keras.layers.ZeroPadding1D,
+    _keras.layers.Cropping1D,
+    _keras.layers.MaxPooling1D,
+    _keras.layers.AveragePooling1D,
+    _keras.layers.GlobalMaxPooling1D,
     _keras.layers.GlobalAveragePooling1D
 ]
+
 _KERAS_ACTIVATION_LAYERS = [
-    _keras.layers.Activation, 
-    _keras.layers.advanced_activations.LeakyReLU, 
-    _keras.layers.advanced_activations.PReLU, 
-    _keras.layers.advanced_activations.ELU, 
-    _keras.layers.advanced_activations.ParametricSoftplus, 
-    _keras.layers.advanced_activations.ThresholdedReLU, 
-    _keras.layers.advanced_activations.SReLU
+    _keras.layers.Activation,
+    _keras.layers.advanced_activations.LeakyReLU,
+    _keras.layers.advanced_activations.PReLU,
+    _keras.layers.advanced_activations.ELU,
+    _keras.layers.advanced_activations.ThresholdedReLU,
 ]
 
 _KERAS_NORMALIZATION_LAYERS = [
@@ -35,6 +29,15 @@ _KERAS_RECURRENT_LAYERS = [
     _keras.layers.recurrent.SimpleRNN,
     _keras.layers.recurrent.GRU,
     _keras.layers.wrappers.Bidirectional,
+]
+
+_KERAS_MERGE_LAYERS = [
+    _keras.layers.Add,
+    _keras.layers.Multiply,
+    _keras.layers.Average,
+    _keras.layers.Maximum,
+    _keras.layers.Concatenate,
+    _keras.layers.Dot,
 ]
 
 def _to_list(x):
@@ -50,6 +53,11 @@ def _insert_to_dict(d, key, e):
     if e not in d[key]:
         d[key].append(e)
 
+def _is_merge_layer(layer):
+    for lt in _KERAS_MERGE_LAYERS:
+        if isinstance(layer, lt):
+            return True
+    return False
 
 class NetGraph(object):
     """
@@ -217,9 +225,9 @@ class NetGraph(object):
             keras_layer = self.keras_layer_map[layer]
             if type(keras_layer) in _KERAS_RECURRENT_LAYERS: 
                 if not isinstance(keras_layer, _keras.layers.wrappers.Bidirectional):
-                    hidden_size = keras_layer.output_dim
+                    hidden_size = keras_layer.units
                 else: 
-                    hidden_size = keras_layer.forward_layer.output_dim
+                    hidden_size = keras_layer.forward_layer.units
                 h_in_name = layer + '_h_in'
                 h_out_name = layer + '_h_out' 
                 self.optional_inputs.append((h_in_name, hidden_size))
@@ -262,7 +270,7 @@ class NetGraph(object):
     
     def _get_first_shared_layer(self):
         for idx, layer in enumerate(self.layer_list):
-            if (not isinstance(self.keras_layer_map[layer], _keras.layers.Merge)) and len(self.get_predecessors(layer)) > 1:   # weight sharing criteria
+            if (not _is_merge_layer(self.keras_layer_map[layer])) and len(self.get_predecessors(layer)) > 1:   # weight sharing criteria
                 return idx
         return -1
     
@@ -404,7 +412,6 @@ class NetGraph(object):
         while idx < nb_layers:
             layer = self.layer_list[idx]
             k_layer = self.keras_layer_map[layer]
-            # unwrap time-distributed layers
             if (isinstance(k_layer, _keras.layers.TimeDistributed)):
                 k_layer = k_layer.layer
             if (isinstance(k_layer, _keras.layers.convolutional.Convolution2D) or 
@@ -456,7 +463,7 @@ class NetGraph(object):
                     u = preds[0] if len(preds) > 0 else None
                 if u is None or (not self.is_1d_layer(u)):
                     in_edges.append((u, v))
-        
+
         out_edges = []
         for layer in self.layer_list: 
             if not self.is_1d_layer(layer):

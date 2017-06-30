@@ -53,8 +53,8 @@ def convert(model, image_input_names=[], is_bgr=False,
 
     class_labels: str
         Filepath where classes are parsed as a list of newline separated
-        strings. Class labels (applies to classifiers only) map the index
-        of the output of a neural network to labels in a classifier.
+        strings. Class labels map the index of the output of a neural network to labels in a classifier.
+        Provide this argument to get a model of type classifier.
 
     predicted_feature_name: str
         Name of the output feature for the class labels exposed in the Core ML
@@ -92,9 +92,21 @@ def convert(model, image_input_names=[], is_bgr=False,
 
         >>> coreml_model = coremltools.converters.caffe.convert(('my_caffe_model.caffemodel',
         ...                 'my_deploy.prototxt', 'mean_image.binaryproto'))
+            
+            
+            
+    Input and output names used in the interface of the converted Core ML model are inferred from the .prototxt file,
+    which contains a description of the network architecture.
+    Input names are read from the input layer definition in the .prototxt. By default, they are of type MultiArray.
+    Argument "image_input_names" can be used to assign image type to specific inputs.
+    All the blobs that are "dangling", i.e.
+    which do not feed as input to any other layer are taken as outputs. The .prototxt file can be modified to specify
+    custom input and output names.
+    
+    The converted Core ML model is of type classifier when the argument "class_labels" is specified.
 
-	Advanced usage with custom classifiers, and images.
-
+    Advanced usage with custom classifiers, and images:
+            
     .. sourcecode:: python
 
 		# Mark some inputs as Images

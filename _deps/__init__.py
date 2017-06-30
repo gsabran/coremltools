@@ -52,10 +52,12 @@ except:
 
 # ---------------------------------------------------------------------------------------
 HAS_KERAS_TF = True
+HAS_KERAS2_TF = True
 KERAS_MIN_VERSION = '1.2.2'
-KERAS_MAX_VERSION = '1.2.2'
+KERAS_MAX_VERSION = '2.0.4'
 TF_MIN_VERSION = '1.0.0'
 TF_MAX_VERSION = '1.1.1'
+
 try:
     # Prevent keras from printing things that are not errors to standard error.
     import sys
@@ -76,15 +78,31 @@ try:
 
     tf_ver = __get_version(tensorflow.__version__)
     k_ver = __get_version(keras.__version__)
-    if not k_ver >= _StrictVersion(KERAS_MIN_VERSION) and \
-            k_ver <= _StrictVersion(KERAS_MAX_VERSION):
+    
+    # keras 1 version too old
+    if k_ver < _StrictVersion(KERAS_MIN_VERSION):
         HAS_KERAS_TF = False
+        HAS_KERAS2_TF = False
         _logging.warn(('Keras version %s is not supported. Minimum required version: %s .'
-                      ' Maximum version: %s .'
                       'Keras conversion will be disabled.')
-                      % (keras.__version__, KERAS_MIN_VERSION, KERAS_MAX_VERSION))
+                      % (keras.__version__, KERAS_MIN_VERSION))
+    # keras version too new
+    if k_ver > _StrictVersion(KERAS_MAX_VERSION):
+        HAS_KERAS_TF = False
+        _logging.warn(('Keras version %s detected. Last version known to be fully compatible of Keras is %s .')
+                      % (keras.__version__, KERAS_MAX_VERSION))
+    # Using Keras 2 rather than 1
+    if k_ver >= _StrictVersion('2.0.0'):
+        HAS_KERAS_TF = False
+        HAS_KERAS2_TF = True
+    # Using Keras 1 rather than 2
+    else:
+        HAS_KERAS_TF = True
+        HAS_KERAS2_TF = False
+    # TensorFlow too old
     if tf_ver < _StrictVersion(TF_MIN_VERSION):
         HAS_KERAS_TF = False
+        HAS_KERAS2_TF = False
         _logging.warn(('TensorFlow version %s is not supported. Minimum required version: %s .'
                       'Keras conversion will be disabled.')
                       % (tensorflow.__version__, TF_MIN_VERSION))
@@ -93,8 +111,10 @@ try:
                       % (tensorflow.__version__, TF_MAX_VERSION))
     if keras.backend.backend() != 'tensorflow':
         HAS_KERAS_TF = False
+        HAS_KERAS2_TF = False
         _logging.warn(('Unsupported Keras backend (only Tensorflow is currently supported). '
                       'Keras conversion will be disabled.'))
 
 except:
     HAS_KERAS_TF = False
+    HAS_KERAS2_TF = False

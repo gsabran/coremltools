@@ -6,7 +6,6 @@
 from . import _utils
 import keras
 import numpy as np
-import tensorflow as tf
 
 
 def _get_recurrent_activation_name_from_keras(activation):
@@ -111,7 +110,7 @@ def _same_elements_per_channel(x):
         if not np.all(np.absolute(xc - xc[0]) < eps):
             return False
     return True
-        
+
 def convert_dense(builder, layer, input_names, output_names, keras_layer):
     """Convert a dense layer from keras to coreml.
 
@@ -133,9 +132,9 @@ def convert_dense(builder, layer, input_names, output_names, keras_layer):
 
     builder.add_inner_product(name = layer,
             W = W,
-            Wb = Wb,
-            nB = keras_layer.input_dim,
-            nC = keras_layer.output_dim,
+            b = Wb,
+            input_channels = keras_layer.input_dim,
+            output_channels = keras_layer.output_dim,
             has_bias = has_bias,
             input_name = input_name,
             output_name = output_name)
@@ -297,10 +296,10 @@ def convert_pooling(builder, layer, input_names, output_names, keras_layer):
         stride_width = stride_width,
         layer_type = layer_type_str,
         padding_type = padding_type,
-        exclude_pad_area = True, 
-        is_global = global_pooling, 
         input_name = input_name,
-        output_name = output_name)
+        output_name = output_name, 
+        exclude_pad_area = True, 
+        is_global = global_pooling)
 
 def convert_padding(builder, layer, input_names, output_names, keras_layer):
     """Convert padding layer from keras to coreml.
@@ -316,8 +315,12 @@ def convert_padding(builder, layer, input_names, output_names, keras_layer):
     # Get input and output names
     input_name, output_name = (input_names[0], output_names[0])
     
-    top, left = keras_layer.padding
-    bottom, right = keras_layer.padding
+    if isinstance(keras_layer, keras.layers.convolutional.ZeroPadding1D):
+        left, right = keras_layer.padding
+        top, bottom = (0, 0)
+    else: # 2D
+        top, left = keras_layer.padding
+        bottom, right = keras_layer.padding
 
     # Now add the layer
     builder.add_padding(name = layer,
@@ -349,7 +352,7 @@ def convert_cropping(builder, layer, input_names, output_names, keras_layer):
     # Now add the layer
     builder.add_crop(name = layer,
         left = left, right=right, top=top, bottom=bottom, offset = [0,0], 
-        input_name = input_name, output_name=output_name
+        input_names = [input_name], output_name=output_name
         )
 
 def convert_reshape(builder, layer, input_names, output_names, keras_layer):
@@ -399,14 +402,14 @@ def convert_upsample(builder, layer, input_names, output_names, keras_layer):
     # Get input and output names
     input_name, output_name = (input_names[0], output_names[0])
 
-    # Currently, we only support upsample of same dims
-    if len(keras_layer.size) == 2:
-        if keras_layer.size[0] != keras_layer.size[1]:
-            raise ValueError("Upsample with different rows and columns not supported.")
+    if isinstance(keras_layer, keras.layers.convolutional.UpSampling1D):
+        fh, fw = 1, keras_layer.length
+    else: # 2D
+        fh, fw = keras_layer.size
 
     builder.add_upsample(name = layer,
-             scaling_factor_h = keras_layer.size[0],
-             scaling_factor_w = keras_layer.size[1],
+             scaling_factor_h = fh,
+             scaling_factor_w = fw, 
              input_name = input_name,
              output_name = output_name)
 
@@ -441,13 +444,13 @@ def convert_convolution(builder, layer, input_names, output_names, keras_layer):
     b = weightList[1] if has_bias else None
 
     builder.add_convolution(name = layer,
-             kernelChannels = channels,
-             outputChannels = n_filters,
+             kernel_channels = channels,
+             output_channels = n_filters,
              height = height,
              width = width,
              stride_height = stride_height,
              stride_width = stride_width,
-             borderMode = keras_layer.border_mode,
+             border_mode = keras_layer.border_mode,
              groups = 1,
              W = W,
              b = b,
@@ -488,13 +491,13 @@ def convert_convolution1d(builder, layer, input_names, output_names, keras_layer
     b = weightList[1] if has_bias else None
 
     builder.add_convolution(name = layer,
-             kernelChannels = input_dim,
-             outputChannels = n_filters,
+             kernel_channels = input_dim,
+             output_channels = n_filters,
              height = 1,
              width = filter_length,
              stride_height = 1,
              stride_width = stride_width,
-             borderMode = keras_layer.border_mode,
+             border_mode = keras_layer.border_mode,
              groups = 1,
              W = W,
              b = b,
@@ -526,42 +529,40 @@ def convert_lstm(builder, layer, input_names, output_names, keras_layer):
 
     # Keras: I C F O; W_x, W_h, b
     # CoreML: I F O G; W_h and W_x are separated
-    W_h = np.zeros((1, 1, hidden_size * 4, hidden_size))
-    W_x = np.zeros((1, 1, hidden_size * 4, input_size))
-    b = np.zeros((hidden_size * 4))
+    W_h, W_x, b = ([], [], [])
     if keras_layer.consume_less == 'cpu':
-        W_h[0,0,0 * hidden_size: 1 * hidden_size] = keras_layer.get_weights()[1].T
-        W_h[0,0,1 * hidden_size: 2 * hidden_size] = keras_layer.get_weights()[7].T
-        W_h[0,0,2 * hidden_size: 3 * hidden_size] = keras_layer.get_weights()[10].T
-        W_h[0,0,3 * hidden_size: 4 * hidden_size] = keras_layer.get_weights()[4].T
+        W_h.append(keras_layer.get_weights()[1].T)
+        W_h.append(keras_layer.get_weights()[7].T)
+        W_h.append(keras_layer.get_weights()[10].T)
+        W_h.append(keras_layer.get_weights()[4].T)
 
-        W_x[0,0,0 * hidden_size: 1 * hidden_size] = keras_layer.get_weights()[0].T
-        W_x[0,0,1 * hidden_size: 2 * hidden_size] = keras_layer.get_weights()[6].T
-        W_x[0,0,2 * hidden_size: 3 * hidden_size] = keras_layer.get_weights()[9].T
-        W_x[0,0,3 * hidden_size: 4 * hidden_size] = keras_layer.get_weights()[3].T
+        W_x.append(keras_layer.get_weights()[0].T)
+        W_x.append(keras_layer.get_weights()[6].T)
+        W_x.append(keras_layer.get_weights()[9].T)
+        W_x.append(keras_layer.get_weights()[3].T)
 
-        b[0 * hidden_size: 1 * hidden_size] = keras_layer.get_weights()[2]
-        b[1 * hidden_size: 2 * hidden_size] = keras_layer.get_weights()[8]
-        b[2 * hidden_size: 3 * hidden_size] = keras_layer.get_weights()[11]
-        b[3 * hidden_size: 4 * hidden_size] = keras_layer.get_weights()[5]
+        b.append(keras_layer.get_weights()[2])
+        b.append(keras_layer.get_weights()[8])
+        b.append(keras_layer.get_weights()[11])
+        b.append(keras_layer.get_weights()[5])
     else:
         keras_W_h = keras_layer.get_weights()[1].T
-        W_h[0,0,0 * hidden_size:][:hidden_size] = keras_W_h[0 * hidden_size:][:hidden_size]
-        W_h[0,0,1 * hidden_size:][:hidden_size] = keras_W_h[1 * hidden_size:][:hidden_size]
-        W_h[0,0,2 * hidden_size:][:hidden_size] = keras_W_h[3 * hidden_size:][:hidden_size]
-        W_h[0,0,3 * hidden_size:][:hidden_size] = keras_W_h[2 * hidden_size:][:hidden_size]
+        W_h.append(keras_W_h[0 * hidden_size:][:hidden_size])
+        W_h.append(keras_W_h[1 * hidden_size:][:hidden_size])
+        W_h.append(keras_W_h[3 * hidden_size:][:hidden_size])
+        W_h.append(keras_W_h[2 * hidden_size:][:hidden_size])
 
         keras_W_x = keras_layer.get_weights()[0].T
-        W_x[0,0,0 * hidden_size:][:hidden_size] = keras_W_x[0 * hidden_size:][:hidden_size]
-        W_x[0,0,1 * hidden_size:][:hidden_size] = keras_W_x[1 * hidden_size:][:hidden_size]
-        W_x[0,0,2 * hidden_size:][:hidden_size] = keras_W_x[3 * hidden_size:][:hidden_size]
-        W_x[0,0,3 * hidden_size:][:hidden_size] = keras_W_x[2 * hidden_size:][:hidden_size]
+        W_x.append(keras_W_x[0 * hidden_size:][:hidden_size])
+        W_x.append(keras_W_x[1 * hidden_size:][:hidden_size])
+        W_x.append(keras_W_x[3 * hidden_size:][:hidden_size])
+        W_x.append(keras_W_x[2 * hidden_size:][:hidden_size])
 
         keras_b = keras_layer.get_weights()[2]
-        b[0 * hidden_size:][:hidden_size] = keras_b[0 * hidden_size:][:hidden_size]
-        b[1 * hidden_size:][:hidden_size] = keras_b[1 * hidden_size:][:hidden_size]
-        b[2 * hidden_size:][:hidden_size] = keras_b[3 * hidden_size:][:hidden_size]
-        b[3 * hidden_size:][:hidden_size] = keras_b[2 * hidden_size:][:hidden_size]
+        b.append(keras_b[0 * hidden_size:][:hidden_size])
+        b.append(keras_b[1 * hidden_size:][:hidden_size])
+        b.append(keras_b[3 * hidden_size:][:hidden_size])
+        b.append(keras_b[2 * hidden_size:][:hidden_size])
 
     # Set activation type
     inner_activation_str = _get_recurrent_activation_name_from_keras(keras_layer.inner_activation)
@@ -570,20 +571,19 @@ def convert_lstm(builder, layer, input_names, output_names, keras_layer):
     # Add to the network
     builder.add_unilstm(
         name = layer,
+        W_h = W_h, W_x = W_x, b = b,
         hidden_size = hidden_size,
         input_size = input_size,
         input_names = input_names,
         output_names = output_names,
-        W_h = W_h, W_x = W_x,
         inner_activation = inner_activation_str,
         cell_state_update_activation = activation_str,
         output_activation = activation_str,
-        b = b,
         output_all = output_all,
         reverse_input = reverse_input)
 
 
-def convert_vanilla_rnn(builder, layer, input_names, output_names, keras_layer):
+def convert_simple_rnn(builder, layer, input_names, output_names, keras_layer):
     """Convert an SimpleRNN layer from keras to coreml.
 
     Parameters
@@ -604,9 +604,9 @@ def convert_vanilla_rnn(builder, layer, input_names, output_names, keras_layer):
     if keras_layer.consume_less not in ['cpu', 'gpu']:
         raise ValueError('Cannot convert Keras layer with consume_less = %s' % keras_layer.consume_less)
     
-    W_h = np.zeros((1, 1, hidden_size, hidden_size))
-    W_x = np.zeros((1, 1, hidden_size, input_size))
-    b = np.zeros((hidden_size))
+    W_h = np.zeros((hidden_size, hidden_size))
+    W_x = np.zeros((hidden_size, input_size))
+    b = np.zeros((hidden_size,))
 
     if keras_layer.consume_less == 'cpu':
         W_h = keras_layer.get_weights()[1].T
@@ -621,12 +621,12 @@ def convert_vanilla_rnn(builder, layer, input_names, output_names, keras_layer):
     activation_str = _get_recurrent_activation_name_from_keras(keras_layer.activation)
 
     # Add to the network
-    builder.add_vanilla_rnn(
+    builder.add_simple_rnn(
         name = layer,
         W_h = W_h, W_x = W_x, b = b,
-        activation = activation_str,
         hidden_size = hidden_size,
         input_size = input_size,
+        activation = activation_str,
         input_names = input_names,
         output_names = output_names,
         output_all=output_all,
@@ -652,24 +652,22 @@ def convert_gru(builder, layer, input_names, output_names, keras_layer):
 
     if keras_layer.consume_less not in ['cpu', 'gpu']:
         raise ValueError('Cannot convert Keras layer with consume_less = %s' % keras_layer.consume_less)
+
     # Keras: Z R O
-    # CoreML: Z R O
-    W_h = np.zeros((1, 1, hidden_size * 3, hidden_size))
-    W_x = np.zeros((1, 1, hidden_size * 3, input_size))
-    b = np.zeros((hidden_size * 3))
-    
+    # CoreML: Z R O    
+    W_h, W_x, b = ([], [], [])
     if keras_layer.consume_less == 'cpu':
-        W_x[0,0,0 * hidden_size: 1 * hidden_size] = keras_layer.get_weights()[0].T
-        W_x[0,0,1 * hidden_size: 2 * hidden_size] = keras_layer.get_weights()[3].T
-        W_x[0,0,2 * hidden_size: 3 * hidden_size] = keras_layer.get_weights()[6].T
+        W_x.append(keras_layer.get_weights()[0].T)
+        W_x.append(keras_layer.get_weights()[3].T)
+        W_x.append(keras_layer.get_weights()[6].T)
 
-        W_h[0,0,0 * hidden_size: 1 * hidden_size] = keras_layer.get_weights()[1].T
-        W_h[0,0,1 * hidden_size: 2 * hidden_size] = keras_layer.get_weights()[4].T
-        W_h[0,0,2 * hidden_size: 3 * hidden_size] = keras_layer.get_weights()[7].T
+        W_h.append(keras_layer.get_weights()[1].T)
+        W_h.append(keras_layer.get_weights()[4].T)
+        W_h.append(keras_layer.get_weights()[7].T)
 
-        b[0 * hidden_size: 1 * hidden_size] = keras_layer.get_weights()[2]
-        b[1 * hidden_size: 2 * hidden_size] = keras_layer.get_weights()[5]
-        b[2 * hidden_size: 3 * hidden_size] = keras_layer.get_weights()[8]
+        b.append(keras_layer.get_weights()[2])
+        b.append(keras_layer.get_weights()[5])
+        b.append(keras_layer.get_weights()[8])
     else:
         print 'consume less not implemented'
 
@@ -681,12 +679,12 @@ def convert_gru(builder, layer, input_names, output_names, keras_layer):
     builder.add_gru(
        name = layer,
        W_h = W_h, W_x = W_x, b = b,
-       activation = activation_str,
-       inner_activation = inner_activation_str,
        input_size = input_size,
        hidden_size = hidden_size,
        input_names = input_names,
        output_names = output_names,
+       activation = activation_str,
+       inner_activation = inner_activation_str,
        output_all=output_all,
        reverse_input = reverse_input)
 
@@ -722,82 +720,76 @@ def convert_bidirectional(builder, layer, input_names, output_names, keras_layer
     # CoreML: I F O G; W_h and W_x are separated
 
     # Keras has all forward weights, followed by backward in the same order
-
-    W_h = np.zeros((1, 1, hidden_size * 4, hidden_size))
-    W_x = np.zeros((1, 1, hidden_size * 4, input_size))
-    b = np.zeros((hidden_size * 4))
+    W_h, W_x, b = ([], [], [])
     if lstm_layer.consume_less == 'cpu':
-        W_h[0,0,0 * hidden_size: 1 * hidden_size] = keras_layer.get_weights()[1].T
-        W_h[0,0,1 * hidden_size: 2 * hidden_size] = keras_layer.get_weights()[7].T
-        W_h[0,0,2 * hidden_size: 3 * hidden_size] = keras_layer.get_weights()[10].T
-        W_h[0,0,3 * hidden_size: 4 * hidden_size] = keras_layer.get_weights()[4].T
+        W_h.append(keras_layer.get_weights()[1].T)
+        W_h.append(keras_layer.get_weights()[7].T)
+        W_h.append(keras_layer.get_weights()[10].T)
+        W_h.append(keras_layer.get_weights()[4].T)
 
-        W_x[0,0,0 * hidden_size: 1 * hidden_size] = keras_layer.get_weights()[0].T
-        W_x[0,0,1 * hidden_size: 2 * hidden_size] = keras_layer.get_weights()[6].T
-        W_x[0,0,2 * hidden_size: 3 * hidden_size] = keras_layer.get_weights()[9].T
-        W_x[0,0,3 * hidden_size: 4 * hidden_size] = keras_layer.get_weights()[3].T
+        W_x.append(keras_layer.get_weights()[0].T)
+        W_x.append(keras_layer.get_weights()[6].T)
+        W_x.append(keras_layer.get_weights()[9].T)
+        W_x.append(keras_layer.get_weights()[3].T)
 
-        b[0 * hidden_size: 1 * hidden_size] = keras_layer.get_weights()[2]
-        b[1 * hidden_size: 2 * hidden_size] = keras_layer.get_weights()[8]
-        b[2 * hidden_size: 3 * hidden_size] = keras_layer.get_weights()[11]
-        b[3 * hidden_size: 4 * hidden_size] = keras_layer.get_weights()[5]
+        b.append(keras_layer.get_weights()[2])
+        b.append(keras_layer.get_weights()[8])
+        b.append(keras_layer.get_weights()[11])
+        b.append(keras_layer.get_weights()[5])
     else:
         keras_W_h = keras_layer.get_weights()[1].T
-        W_h[0,0,0 * hidden_size:][:hidden_size] = keras_W_h[0 * hidden_size:][:hidden_size]
-        W_h[0,0,1 * hidden_size:][:hidden_size] = keras_W_h[1 * hidden_size:][:hidden_size]
-        W_h[0,0,2 * hidden_size:][:hidden_size] = keras_W_h[3 * hidden_size:][:hidden_size]
-        W_h[0,0,3 * hidden_size:][:hidden_size] = keras_W_h[2 * hidden_size:][:hidden_size]
+        W_h.append(keras_W_h[0 * hidden_size:][:hidden_size])
+        W_h.append(keras_W_h[1 * hidden_size:][:hidden_size])
+        W_h.append(keras_W_h[3 * hidden_size:][:hidden_size])
+        W_h.append(keras_W_h[2 * hidden_size:][:hidden_size])
 
         keras_W_x = keras_layer.get_weights()[0].T
-        W_x[0,0,0 * hidden_size:][:hidden_size] = keras_W_x[0 * hidden_size:][:hidden_size]
-        W_x[0,0,1 * hidden_size:][:hidden_size] = keras_W_x[1 * hidden_size:][:hidden_size]
-        W_x[0,0,2 * hidden_size:][:hidden_size] = keras_W_x[3 * hidden_size:][:hidden_size]
-        W_x[0,0,3 * hidden_size:][:hidden_size] = keras_W_x[2 * hidden_size:][:hidden_size]
+        W_x.append(keras_W_x[0 * hidden_size:][:hidden_size])
+        W_x.append(keras_W_x[1 * hidden_size:][:hidden_size])
+        W_x.append(keras_W_x[3 * hidden_size:][:hidden_size])
+        W_x.append(keras_W_x[2 * hidden_size:][:hidden_size])
 
         keras_b = keras_layer.get_weights()[2]
-        b[0 * hidden_size:][:hidden_size] = keras_b[0 * hidden_size:][:hidden_size]
-        b[1 * hidden_size:][:hidden_size] = keras_b[1 * hidden_size:][:hidden_size]
-        b[2 * hidden_size:][:hidden_size] = keras_b[3 * hidden_size:][:hidden_size]
-        b[3 * hidden_size:][:hidden_size] = keras_b[2 * hidden_size:][:hidden_size]
+        b.append(keras_b[0 * hidden_size:][:hidden_size])
+        b.append(keras_b[1 * hidden_size:][:hidden_size])
+        b.append(keras_b[3 * hidden_size:][:hidden_size])
+        b.append(keras_b[2 * hidden_size:][:hidden_size])
 
-
-    W_h_back = np.zeros((1, 1, hidden_size * 4, hidden_size))
-    W_x_back = np.zeros((1, 1, hidden_size * 4, input_size))
-    b_back = np.zeros((hidden_size * 4))
+    W_h_back, W_x_back, b_back = ([],[],[])
     if keras_layer.backward_layer.consume_less == 'cpu':
         back_weights = keras_layer.backward_layer.get_weights()
-        W_h_back[0,0,0 * hidden_size: 1 * hidden_size] = back_weights[1].T
-        W_h_back[0,0,1 * hidden_size: 2 * hidden_size] = back_weights[7].T
-        W_h_back[0,0,2 * hidden_size: 3 * hidden_size] = back_weights[10].T
-        W_h_back[0,0,3 * hidden_size: 4 * hidden_size] = back_weights[4].T
+        W_h_back.append(back_weights[1].T)
+        W_h_back.append(back_weights[7].T)
+        W_h_back.append(back_weights[10].T)
+        W_h_back.append(back_weights[4].T)
 
-        W_x_back[0,0,0 * hidden_size: 1 * hidden_size] = back_weights[0].T
-        W_x_back[0,0,1 * hidden_size: 2 * hidden_size] = back_weights[6].T
-        W_x_back[0,0,2 * hidden_size: 3 * hidden_size] = back_weights[9].T
-        W_x_back[0,0,3 * hidden_size: 4 * hidden_size] = back_weights[3].T
+        W_x_back.append(back_weights[0].T)
+        W_x_back.append(back_weights[6].T)
+        W_x_back.append(back_weights[9].T)
+        W_x_back.append(back_weights[3].T)
 
-        b_back[0 * hidden_size: 1 * hidden_size] = back_weights[2]
-        b_back[1 * hidden_size: 2 * hidden_size] = back_weights[8]
-        b_back[2 * hidden_size: 3 * hidden_size] = back_weights[11]
-        b_back[3 * hidden_size: 4 * hidden_size] = back_weights[5]
+        b_back.append(back_weights[2])
+        b_back.append(back_weights[8])
+        b_back.append(back_weights[11])
+        b_back.append(back_weights[5])
     else:
         keras_W_h = keras_layer.backward_layer.get_weights()[1].T
-        W_h_back[0,0,0 * hidden_size:][:hidden_size] = keras_W_h[0 * hidden_size:][:hidden_size]
-        W_h_back[0,0,1 * hidden_size:][:hidden_size] = keras_W_h[1 * hidden_size:][:hidden_size]
-        W_h_back[0,0,2 * hidden_size:][:hidden_size] = keras_W_h[3 * hidden_size:][:hidden_size]
-        W_h_back[0,0,3 * hidden_size:][:hidden_size] = keras_W_h[2 * hidden_size:][:hidden_size]
+        W_h_back.append(keras_W_h[0 * hidden_size:][:hidden_size])
+        W_h_back.append(keras_W_h[1 * hidden_size:][:hidden_size])
+        W_h_back.append(keras_W_h[3 * hidden_size:][:hidden_size])
+        W_h_back.append(keras_W_h[2 * hidden_size:][:hidden_size])
 
         keras_W_x = keras_layer.backward_layer.get_weights()[0].T
-        W_x_back[0,0,0 * hidden_size:][:hidden_size] = keras_W_x[0 * hidden_size:][:hidden_size]
-        W_x_back[0,0,1 * hidden_size:][:hidden_size] = keras_W_x[1 * hidden_size:][:hidden_size]
-        W_x_back[0,0,2 * hidden_size:][:hidden_size] = keras_W_x[3 * hidden_size:][:hidden_size]
-        W_x_back[0,0,3 * hidden_size:][:hidden_size] = keras_W_x[2 * hidden_size:][:hidden_size]
+        W_x_back.append(keras_W_x[0 * hidden_size:][:hidden_size])
+        W_x_back.append(keras_W_x[1 * hidden_size:][:hidden_size])
+        W_x_back.append(keras_W_x[3 * hidden_size:][:hidden_size])
+        W_x_back.append(keras_W_x[2 * hidden_size:][:hidden_size])
 
         keras_b = keras_layer.backward_layer.get_weights()[2]
-        b_back[0 * hidden_size:][:hidden_size] = keras_b[0 * hidden_size:][:hidden_size]
-        b_back[1 * hidden_size:][:hidden_size] = keras_b[1 * hidden_size:][:hidden_size]
-        b_back[2 * hidden_size:][:hidden_size] = keras_b[3 * hidden_size:][:hidden_size]
-        b_back[3 * hidden_size:][:hidden_size] = keras_b[2 * hidden_size:][:hidden_size]
+        b_back.append(keras_b[0 * hidden_size:][:hidden_size])
+        b_back.append(keras_b[1 * hidden_size:][:hidden_size])
+        b_back.append(keras_b[3 * hidden_size:][:hidden_size])
+        b_back.append(keras_b[2 * hidden_size:][:hidden_size])
 
     # Set activation type
     inner_activation_str = _get_recurrent_activation_name_from_keras(lstm_layer.inner_activation)
@@ -807,16 +799,15 @@ def convert_bidirectional(builder, layer, input_names, output_names, keras_layer
     # Add to the network
     builder.add_bidirlstm(
         name = layer,
+        W_h = W_h, W_x = W_x, b = b, 
+        W_h_back = W_h_back, W_x_back = W_x_back, b_back = b_back,
         hidden_size=hidden_size,
         input_size=input_size,
         input_names=input_names,
         output_names=output_names,
-        W_h = W_h, W_x = W_x,
-        W_h_back = W_h_back, W_x_back = W_x_back,
         inner_activation = inner_activation_str,
         cell_state_update_activation = activation_str,
         output_activation = activation_str,
-        b = b, b_back = b_back,
         output_all = output_all)
 
 def convert_batchnorm(builder, layer, input_names, output_names, keras_layer):
@@ -843,7 +834,6 @@ def convert_batchnorm(builder, layer, input_names, output_names, keras_layer):
 
     # Set parameters
     # Parameter arrangement in Keras: gamma, beta, mean, variance
-    # TODO - Work with team to see if this logic needs to be moved to compiler 
     gamma = keras_layer.get_weights()[0]
     beta = keras_layer.get_weights()[1]
     mean = keras_layer.get_weights()[2]
@@ -888,7 +878,7 @@ def convert_flatten(builder, layer, input_names, output_names, keras_layer):
     if len(keras_layer.input.shape) == 4:
         blob_order = 1
     
-    builder.add_flatten(blob_order, layer, input_name, output_name)
+    builder.add_flatten(name=layer, mode=blob_order, input_name=input_name, output_name=output_name)
 
 def convert_softmax(builder, layer, input_names, output_names, keras_layer):
     """Convert a softmax layer from keras to coreml.
@@ -937,8 +927,8 @@ def convert_permute(builder, layer, input_names, output_names, keras_layer):
     else: 
         raise NotImplementedError('Supports only 3d permutation.')
     
-    builder.add_permute(name = layer, input_name = input_name,
-            output_name = output_name, dim=dim)
+    builder.add_permute(name = layer, dim=dim, input_name = input_name,
+            output_name = output_name)
 
 def convert_embedding(builder, layer, input_names, output_names, keras_layer):
     """Convert a dense layer from keras to coreml.
@@ -960,9 +950,9 @@ def convert_embedding(builder, layer, input_names, output_names, keras_layer):
     # assuming keras embedding layers don't have biases 
     builder.add_embedding(name = layer,
                           W = W,
-                          Wb = None,
-                          nB = keras_layer.input_dim,
-                          nC = keras_layer.output_dim,
+                          b = None,
+                          input_dim = keras_layer.input_dim,
+                          output_channels = keras_layer.output_dim,
                           has_bias = False,
                           input_name = input_name,
                           output_name = output_name)
@@ -972,7 +962,7 @@ def convert_repeat_vector(builder, layer, input_names, output_names, keras_layer
     # Get input and output names
     input_name, output_name = (input_names[0], output_names[0])
 
-    builder.add_repeat(name = layer,
+    builder.add_sequence_repeat(name = layer,
             nrep = keras_layer.n, 
             input_name = input_name,
             output_name = output_name)

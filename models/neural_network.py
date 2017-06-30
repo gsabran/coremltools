@@ -60,7 +60,7 @@ class NeuralNetworkBuilder(object):
 
         # Build a simple neural network with 1 inner product layer
         >>> builder = NeuralNetworkBuilder(input_features, output_features)
-        >>> builder.add_inner_product(name = 'ip_layer', W = weights, Wb = bias, nB = 3, nC = 2,
+        >>> builder.add_inner_product(name = 'ip_layer', W = weights, b = bias, input_channels = 3, output_channels = 2,
         ... has_bias = True, input_name = 'data', output_name = 'probs')
 
         # save the spec by the builder
@@ -261,7 +261,7 @@ class NeuralNetworkBuilder(object):
         optionals_in: [str]
             List of inputs that are optionals.
 
-        input_dims: [tuple]
+        optionals_out: [str]
             List of outputs that are optionals.
 
         See Also
@@ -296,7 +296,7 @@ class NeuralNetworkBuilder(object):
             spec.description.output[idx].type.multiArrayType.dataType = _Model_pb2.ArrayFeatureType.DOUBLE
 
 
-    def add_inner_product(self, name, W, Wb, nB, nC, has_bias,
+    def add_inner_product(self, name, W, b, input_channels, output_channels, has_bias,
                           input_name, output_name):
         """
         Add an inner product layer to the model.
@@ -306,17 +306,19 @@ class NeuralNetworkBuilder(object):
         name: str
             The name of this layer
         W: numpy.array
-            Weight matrix of shape (nB, nC).
-        Wb: numpy.array
-            Bias vector of shape (nC, ).
-        nB: int
+            Weight matrix of shape (input_channels, output_channels).
+        b: numpy.array
+            Bias vector of shape (output_channels, ).
+        input_channels: int
             Number of input channels.
-        nC: int
+        output_channels: int
             Number of output channels.
         has_bias: boolean
             Whether the bias vector of this layer is ignored in the spec.
+
             - If True, the bias vector of this layer is not ignored.
             - If False, the bias vector is ignored.
+
         input_name: str
             The input blob name of this layer.
         output_name: str
@@ -338,17 +340,17 @@ class NeuralNetworkBuilder(object):
         spec_layer_params = spec_layer.innerProduct
 
         # Fill in the parameters
-        spec_layer_params.inputChannels = nB
-        spec_layer_params.outputChannels = nC
+        spec_layer_params.inputChannels = input_channels
+        spec_layer_params.outputChannels = output_channels
         spec_layer_params.hasBias = has_bias
 
         weights = spec_layer_params.weights
         weights.floatValue.extend(map(float, W.flatten()))
         if has_bias:
             bias = spec_layer_params.bias
-            bias.floatValue.extend(map(float, Wb.flatten()))
+            bias.floatValue.extend(map(float, b.flatten()))
 
-    def add_embedding(self, name, W, Wb, nB, nC, has_bias,
+    def add_embedding(self, name, W, b, input_dim, output_channels, has_bias,
                       input_name, output_name):
         """
         Add an embedding layer to the model.
@@ -358,17 +360,19 @@ class NeuralNetworkBuilder(object):
         name: str
             The name of this layer
         W: numpy.array
-            Weight matrix of shape (nB, nC).
-        Wb: numpy.array
-            Bias vector of shape (nC, ).
-        nB: int
-            Number of input channels.
-        nC: int
+            Weight matrix of shape (input_channels, output_channels).
+        b: numpy.array
+            Bias vector of shape (output_channels, ).
+        input_dim: int
+            Size of the vocabulary (1 + maximum integer index of the words).
+        output_channels: int
             Number of output channels.
         has_bias: boolean
             Whether the bias vector of this layer is ignored in the spec.
+
             - If True, the bias vector of this layer is not ignored.
             - If False, the bias vector is ignored.
+
         input_name: str
             The input blob name of this layer.
         output_name: str
@@ -391,15 +395,15 @@ class NeuralNetworkBuilder(object):
         # Fill in the parameters
         spec_layer_params = spec_layer.embedding
 
-        spec_layer_params.inputDim = nB
-        spec_layer_params.outputChannels = nC
+        spec_layer_params.inputDim = input_dim
+        spec_layer_params.outputChannels = output_channels
         spec_layer_params.hasBias = has_bias
 
         weights = spec_layer_params.weights
         weights.floatValue.extend(map(float, W.flatten()))
         if has_bias:
             bias = spec_layer_params.bias
-            bias.floatValue.extend(map(float, Wb.flatten()))
+            bias.floatValue.extend(map(float, b.flatten()))
 
 
     def add_softmax(self, name, input_name, output_name):
@@ -440,52 +444,73 @@ class NeuralNetworkBuilder(object):
         name: str
             The name of this layer
         non_linearity: str
-            The non_linearity (activation) function of this layer. It can be one of the following:
+            The non_linearity (activation) function of this layer. 
+            It can be one of the following:
 
-            - 'RELU': Rectified Linear Unit (ReLU) function.
-            - 'SIGMOID': sigmoid function.
-            - 'TANH': tanh function.
-            - 'SCALED_TANH': scaled tanh function, defined as: f(x) = alpha *
-              tanh(beta * x) where alpha and beta are constant scalars.
-            - 'SOFTPLUS': softplus function.
-            - 'SOFTSIGN': softsign function.
-            - 'SIGMOID_HARD': hard sigmoid function, defined as: f(x) =
-              min(max(alpha * x + beta, -1), 1) where alpha and beta are
-              constant scalars.
-            - 'LEAKYRELU': leaky relu function, defined as: f(x) = (x >= 0) * x
-              + (x < 0) * alpha * x where alpha is a constant scalar.
-            - 'PRELU': Parametric ReLU function, defined as: f(x) = (x >= 0) *
-              x + (x < 0) * alpha * x
-              where alpha is a multi-dimensional array of same size as x.
-            - 'ELU': Exponential linear unit function, defined as: f(x) = (x >=
-              0) * x + (x < 0) * (alpha * exp(x) - 1) where alpha is a constant
-              scalar.
-            - 'PARAMETRICSOFTPLUS': Parametric softplus function, defined as:
-              f(x) = alpha * log(1 + exp(beta * x)) where alpha and beta are
-              two multi-dimensional arrays of same size as x.
-            - 'THRESHOLDEDRELU': Thresholded ReLU function, defined as: f(x) =
-              (x >= alpha) * x where alpha is a constant scalar.
-            - 'LINEAR': linear function.
+                - 'RELU': Rectified Linear Unit (ReLU) function.
+                - 'SIGMOID': sigmoid function.
+                - 'TANH': tanh function.
+                - 'SCALED_TANH': scaled tanh function, defined as: 
+
+                  `f(x) = alpha * tanh(beta * x)`
+
+                  where alpha and beta are constant scalars.
+
+                - 'SOFTPLUS': softplus function.
+                - 'SOFTSIGN': softsign function.
+                - 'SIGMOID_HARD': hard sigmoid function, defined as: 
+
+                  `f(x) = min(max(alpha * x + beta, -1), 1)` 
+
+                  where alpha and beta are constant scalars.
+                - 'LEAKYRELU': leaky relu function, defined as: 
+
+                  `f(x) = (x >= 0) * x + (x < 0) * alpha * x`
+
+                  where alpha is a constant scalar.
+                - 'PRELU': Parametric ReLU function, defined as: 
+
+                  `f(x) = (x >= 0) * x + (x < 0) * alpha * x`
+
+                  where alpha is a multi-dimensional array of same size as x.
+                - 'ELU': Exponential linear unit function, defined as: 
+
+                  `f(x) = (x >= 0) * x + (x < 0) * (alpha * exp(x) - 1)`
+
+                  where alpha is a constant scalar.
+
+                - 'PARAMETRICSOFTPLUS': Parametric softplus function, defined as:
+
+                  `f(x) = alpha * log(1 + exp(beta * x))`
+
+                  where alpha and beta are two multi-dimensional arrays of same size as x.
+                - 'THRESHOLDEDRELU': Thresholded ReLU function, defined as: 
+
+                  `f(x) = (x >= alpha) * x`
+
+                  where alpha is a constant scalar.
+                - 'LINEAR': linear function.
+
         input_name: str
             The input blob name of this layer.
         output_name: str
             The output blob name of this layer.
         params: [float] | [numpy.array]
-            Parameters for the activation, depending on non_linearity. When non_linearity is:
+            Parameters for the activation, depending on non_linearity. 
 
-            - 'RELU', 'SIGMOID', 'TANH', 'SCALED_TANH', 'SOFTPLUS', 'SOFTSIGN',
-              'LINEAR': params is ignored.
-            - 'SCALED_TANH', 'SIGMOID_HARD': param is a list of 2 floats
-              [alpha, beta].
-            - 'LEAKYRELU', 'ELU', 'THRESHOLDEDRELU': param is a list of 1 float
-              [alpha].
-            - 'PRELU': param is a list of 1 numpy array [alpha]. The shape of
-              alpha is (C,), where C is either the number of input channels or
-              1. When C = 1, same alpha is applied to all channels.
-            - 'PARAMETRICSOFTPLUS': param is a list of 2 numpy arrays [alpha,
-              beta]. The shape of alpha and beta is (C, ), where C is either
-              the number of input channels or 1. When C = 1, same alpha and
-              beta are applied to all channels.
+                - When non_linearity is one of ['RELU', 'SIGMOID', 'TANH', 'SCALED_TANH', 'SOFTPLUS', 'SOFTSIGN',
+                  'LINEAR'], params is ignored.
+                - When non_linearity is one of ['SCALED_TANH', 'SIGMOID_HARD'], param is a list of 2 floats
+                  [alpha, beta].
+                - When non_linearity is one of ['LEAKYRELU', 'ELU', 'THRESHOLDEDRELU'], param is a list of 1 float
+                  [alpha].
+                - When non_linearity is 'PRELU', param is a list of 1 numpy array [alpha]. The shape of
+                  alpha is (C,), where C is either the number of input channels or
+                  1. When C = 1, same alpha is applied to all channels.
+                - When non_linearity is 'PARAMETRICSOFTPLUS', param is a list of 2 numpy arrays [alpha,
+                  beta]. The shape of alpha and beta is (C, ), where C is either
+                  the number of input channels or 1. When C = 1, same alpha and
+                  beta are applied to all channels.
 
         See Also
         --------
@@ -540,7 +565,7 @@ class NeuralNetworkBuilder(object):
                 alpha = 0.3
             else:
                 alpha = params[0]
-            spec_layer_params.leakyReLU.alpha = alpha
+            spec_layer_params.leakyReLU.alpha = float(alpha)
 
         elif non_linearity == 'PRELU':
             # PReLU must provide an np array in params[0]
@@ -577,7 +602,7 @@ class NeuralNetworkBuilder(object):
         ----------
         name: str
             The name of this layer
-        input_names: list[str]
+        input_names: [str]
             A list of input blob names of this layer. The input blobs should have the same shape.
         output_name: str
             The output blob name of this layer.
@@ -595,7 +620,7 @@ class NeuralNetworkBuilder(object):
        
         See Also
         --------
-        add_upsample, add_repeat
+        add_upsample, add_sequence_repeat
        
         """
         spec = self.spec
@@ -647,7 +672,7 @@ class NeuralNetworkBuilder(object):
 
         See Also
         --------
-        add_repeat, add_elementwise
+        add_sequence_repeat, add_elementwise
         """
         spec = self.spec
         nn_spec = self.nn_spec
@@ -661,7 +686,7 @@ class NeuralNetworkBuilder(object):
         spec_layer_params.scalingFactor.append(scaling_factor_h)
         spec_layer_params.scalingFactor.append(scaling_factor_w)
 
-    def add_repeat(self, name, nrep, input_name, output_name):
+    def add_sequence_repeat(self, name, nrep, input_name, output_name):
         """
         Add sequence repeat layer to the model.
        
@@ -689,9 +714,9 @@ class NeuralNetworkBuilder(object):
         spec_layer_params = spec_layer.sequenceRepeat
         spec_layer_params.nRepetitions = nrep
 
-    def add_convolution(self, name, kernelChannels, outputChannels, height,
-            width, stride_height, stride_width, borderMode, groups, W, b,
-            has_bias, is_deconv, output_shape, input_name, output_name):
+    def add_convolution(self, name, kernel_channels, output_channels, height,
+            width, stride_height, stride_width, border_mode, groups, W, b,
+            has_bias, is_deconv, output_shape, input_name, output_name, dilation_factors = [1,1]):
         """
         Add a convolution layer to the network.
 
@@ -702,9 +727,9 @@ class NeuralNetworkBuilder(object):
         ----------
         name: str
             The name of this layer.
-        kernelChannels: int
+        kernel_channels: int
             Number of channels for the convolution kernels.
-        outputChannels: int
+        output_channels: int
             Number of filter kernels. This is equal to the number of channels in the output blob.
         height: int
             Height of each kernel.
@@ -714,30 +739,41 @@ class NeuralNetworkBuilder(object):
             Stride along the height direction.
         stride_width: int
             Stride along the height direction.
-        borderMode: str
+        border_mode: str
             Option for the output blob shape. Can be either 'valid' or 'same'.
         groups: int
-            Number of kernel groups. Each kernel group share the same weights. This is equal to (input channels / kernelChannels).
+            Number of kernel groups. Each kernel group share the same weights. This is equal to (input channels / kernel_channels).
         W: numpy.array
             Weights of the convolution kernels.
-            - If is_deconv is False, W should have shape (outputChannels, kernelChannels, height, width).
-            - If is_deconv is True, W should have shape (kernelChannels,outputChannels,kernelHeight,kernelWidth).
+
+            - If is_deconv is False, W should have shape (output_channels, kernel_channels, height, width).
+            - If is_deconv is True, W should have shape (kernel_channels, output_channels, height, width).
+
         b: numpy.array
             Biases of the convolution kernels. b should have shape (outputChannels, ).
         has_bias: boolean
             Whether bias is ignored.
+
             - If True, bias is not ignored.
             - If False, bias is ignored.
+
         is_deconv: boolean
             Whether the convolution layer is performing a convolution or a transposed convolution (deconvolution).
+
             - If True, the convolution layer is performing transposed convolution.
             - If False, the convolution layer is performing regular convolution.
+
         output_shape: tuple
             A 3-tuple, specifying the output shape (output_height, output_width, output_channels). Used only when is_deconv == True.
+            When is_deconv == False, this parameter is ignored.
         input_name: str
             The input blob name of this layer.
         output_name: str
             The output blob name of this layer.
+
+        dilation_factors: [int]
+            Dilation factors across height and width directions. Must of a list of two positive integers. 
+            Defaults to [1,1]
 
         See Also
         --------
@@ -758,14 +794,14 @@ class NeuralNetworkBuilder(object):
         spec_layer_params = spec_layer.convolution
         spec_layer_params.isDeconvolution = is_deconv
         spec_layer_params.outputShape.extend(output_shape)
-        spec_layer_params.outputChannels = outputChannels
-        spec_layer_params.kernelChannels = kernelChannels
+        spec_layer_params.outputChannels = output_channels
+        spec_layer_params.kernelChannels = kernel_channels
         spec_layer_params.kernelSize.append(height)
         spec_layer_params.kernelSize.append(width)
         spec_layer_params.stride.append(stride_height)
         spec_layer_params.stride.append(stride_width)
 
-        if borderMode == 'valid':
+        if border_mode == 'valid':
             valid = spec_layer_params.valid
             height_border = spec_layer_params.valid.paddingAmounts.borderAmounts.add()
             height_border.startEdgeSize = 0
@@ -773,12 +809,12 @@ class NeuralNetworkBuilder(object):
             width_border = spec_layer_params.valid.paddingAmounts.borderAmounts.add()
             width_border.startEdgeSize = 0
             width_border.endEdgeSize = 0
-        elif borderMode == 'same':
+        elif border_mode == 'same':
             same = spec_layer_params.same
             spec_layer_params.same.asymmetryMode = _NeuralNetwork_pb2.SamePadding.SamePaddingMode.Value('BOTTOM_RIGHT_HEAVY')
         else:
             raise NotImplementedError(
-                'Border mode %s is not implemented.' % borderMode)
+                'Border mode %s is not implemented.' % border_mode)
 
         spec_layer_params.nGroups = groups
         spec_layer_params.hasBias = has_bias
@@ -791,17 +827,21 @@ class NeuralNetworkBuilder(object):
             Wt = W.transpose((3,2,0,1)).flatten()
         else:
             Wt = W.transpose((2,3,0,1)).flatten()
-        for idx in xrange(outputChannels * kernelChannels * height * width):
+        for idx in xrange(output_channels * kernel_channels * height * width):
             weights.floatValue.append(float(Wt[idx]))
 
         # Assign biases
         if has_bias:
             bias = spec_layer_params.bias
-            for f in xrange(outputChannels):
+            for f in xrange(output_channels):
                 bias.floatValue.append(float(b[f]))
+        
+        # add dilation factors
+        spec_layer_params.dilationFactor.append(dilation_factors[0])
+        spec_layer_params.dilationFactor.append(dilation_factors[1])
 
     def add_pooling(self, name, height, width, stride_height, stride_width,
-            layer_type, padding_type, exclude_pad_area, is_global, input_name, output_name):
+            layer_type, padding_type, input_name, output_name, exclude_pad_area = True, is_global = False):
         """
         Add a pooling layer to the model.
 
@@ -821,20 +861,24 @@ class NeuralNetworkBuilder(object):
             Type of pooling performed. Can either be 'MAX', 'AVERAGE' or 'L2'.
         padding_type: str
             Option for the output blob shape. Can be either 'VALID' or 'SAME'.
-        exclude_pad_area: boolean
-            Whether to exclude padded area in the pooling operation.
-            - If True, the value of the padded area will be excluded.
-            - If False, the padded area will be included.
-            This flag is only used with average pooling.
-        is_global: boolean
-            Whether the pooling operation is global.
-            - If True, the pooling operation is global -- the pooling region is of the same size of the input blob.
-            Parameters height, width, stride_height, stride_width will be ignored.
-            - If False, the pooling operation is not global.
         input_name: str
             The input blob name of this layer.
         output_name: str
             The output blob name of this layer.
+
+        exclude_pad_area: boolean
+            Whether to exclude padded area in the pooling operation. Defaults to True.
+
+            - If True, the value of the padded area will be excluded.
+            - If False, the padded area will be included.
+            This flag is only used with average pooling.
+        is_global: boolean
+            Whether the pooling operation is global. Defaults to False. 
+
+            - If True, the pooling operation is global -- the pooling region is of the same size of the input blob.
+            Parameters height, width, stride_height, stride_width will be ignored.
+
+            - If False, the pooling operation is not global.
 
         See Also
         --------
@@ -920,32 +964,38 @@ class NeuralNetworkBuilder(object):
         width_border.startEdgeSize = left
         width_border.endEdgeSize = right
 
-    def add_crop(self, name, left, right, top, bottom, offset, input_name,
+    def add_crop(self, name, left, right, top, bottom, offset, input_names,
             output_name):
         """
         Add a cropping layer to the model.
+        The cropping layer have two functional modes:
+
+            - When it has 1 input blob, it crops the input blob based
+              on the 4 parameters [left, right, top, bottom]. 
+            - When it has 2 input blobs, it crops the first input blob based
+              on the dimension of the second blob with an offset. 
 
         Parameters
         ----------
         name: str
             The name of this layer.
         left: int
-            Number of elements to be cropped on the left side of the input blob when the crop layer takes 1 input.
+            Number of elements to be cropped on the left side of the input blob. 
             When the crop layer takes 2 inputs, this parameter is ignored.
         right: int
-            Number of elements to be cropped on the right side of the input blob when the crop layer takes 1 input.
+            Number of elements to be cropped on the right side of the input blob.
             When the crop layer takes 2 inputs, this parameter is ignored.
         top: int
-            Number of elements to be cropped on the top of the input blob When the crop layer takes 1 input.
+            Number of elements to be cropped on the top of the input blob.
             When the crop layer takes 2 inputs, this parameter is ignored.
         bottom: int
-            Number of elements to be cropped on the bottom of the input blob when the crop layer takes 1 input.
+            Number of elements to be cropped on the bottom of the input blob.
             When the crop layer takes 2 inputs, this parameter is ignored.
-        offset: (int, int)
-            Offset along the height and width directions when the crop layer takes 2 inputs.
+        offset: [int]
+            Offset along the height and width directions when the crop layer takes 2 inputs. Must be a list of length 2.
             When the crop layer takes 1 input, this parameter is ignored.
-        input_names: str | list(str)
-            The input blob name(s) of this layer. Must be either a string, a list of 1 string (1 input crop layer),
+        input_names: [str]
+            The input blob name(s) of this layer. Must be either a list of 1 string (1 input crop layer),
             or a list of 2 strings (2-input crop layer).
         output_name: str
             The output blob name of this layer.
@@ -960,11 +1010,13 @@ class NeuralNetworkBuilder(object):
         # Add a new layer
         spec_layer = nn_spec.layers.add()
         spec_layer.name = name
-        spec_layer.input.append(input_name)
+        for input_name in input_names: 
+            spec_layer.input.append(input_name)
         spec_layer.output.append(output_name)
         spec_layer_params = spec_layer.crop
 
         # Set the parameters
+        offset = [0,0] if len(input_name) == 1 else offset
         spec_layer_params.offset.extend(offset)
         height_border = spec_layer_params.cropAmounts.borderAmounts.add()
         height_border.startEdgeSize = top
@@ -973,7 +1025,7 @@ class NeuralNetworkBuilder(object):
         width_border.startEdgeSize = left
         width_border.endEdgeSize = right
 
-    def add_vanilla_rnn(self,name, W_h, W_x, b, activation, hidden_size, input_size, input_names, output_names, output_all = False, reverse_input = False):
+    def add_simple_rnn(self,name, W_h, W_x, b, hidden_size, input_size, activation, input_names, output_names, output_all = False, reverse_input = False):
         """
         Add a simple recurrent layer to the model.
 
@@ -985,26 +1037,28 @@ class NeuralNetworkBuilder(object):
             Weights of the recurrent layer's hidden state. Must be of shape (hidden_size, hidden_size).
         W_x: numpy.array
             Weights of the recurrent layer's input. Must be of shape (hidden_size, input_size).
-        b: numpy.array
-            Bias of the recurrent layer's output. Must be of shape (hidden_size, ).
-        activation: str
-            Activation function name. Can be one of the following option:
-            ['RELU', 'TANH', 'SIGMOID', 'SCALED_TANH', 'SIGMOID_HARD', 'LINEAR'].
-            See add_activation for more detailed description.
+        b: numpy.array | None
+            Bias of the recurrent layer's output. If None, bias is ignored. Otherwise it must be of shape (hidden_size, ).
         hidden_size: int
             Number of hidden units. This is equal to the number of channels of output shape.
         input_size: int
             Number of the number of channels of input shape.
-        input_name: str
-            The input blob name of this layer.
-        output_name: str
-            The output blob name of this layer.
+        activation: str
+            Activation function name. Can be one of the following option:
+            ['RELU', 'TANH', 'SIGMOID', 'SCALED_TANH', 'SIGMOID_HARD', 'LINEAR'].
+            See add_activation for more detailed description.
+        input_names: [str]
+            The input blob name list of this layer, in the order of [x, h_input].
+        output_name: [str]
+            The output blob name list of this layer, in the order of [y, h_output].
         output_all: boolean
             Whether the recurrent layer should output at every time step.
+
             - If False, the output is the result after the final state update.
             - If True, the output is a sequence, containing outputs at all time steps.
         reverse_input: boolean
             Whether the recurrent layer should process the input sequence in the reverse order.
+
             - If False, the input sequence order is not reversed.
             - If True, the input sequence order is reversed.
 
@@ -1029,7 +1083,7 @@ class NeuralNetworkBuilder(object):
         #set the parameters
         spec_layer_params.inputVectorSize = input_size
         spec_layer_params.outputVectorSize = hidden_size
-        if b is not None and b.any():
+        if b is not None:
             spec_layer_params.hasBiasVector = True
         spec_layer_params.sequenceOutput = output_all
 
@@ -1040,11 +1094,11 @@ class NeuralNetworkBuilder(object):
         spec_layer_params.weightMatrix.floatValue.extend(map(float, W_x.flatten()))
         spec_layer_params.recursionMatrix.floatValue.extend(map(float, W_h.flatten()))
 
-        if b is not None and b.any():
+        if b is not None:
             spec_layer_params.biasVector.floatValue.extend(map(float, b.flatten()))
 
-    def add_gru(self, name, W_h, W_x, b, activation, inner_activation,
-            hidden_size, input_size, input_names, output_names,
+    def add_gru(self, name, W_h, W_x, b, hidden_size, input_size, 
+            input_names, output_names, activation = 'TANH', inner_activation = 'SIGMOID_HARD', 
             output_all = False, reverse_input = False):
         """
         Add a Gated-Recurrent Unit (GRU) layer to the model.
@@ -1061,38 +1115,42 @@ class NeuralNetworkBuilder(object):
             List of input weight matrices. The ordering is [W_z, W_r, W_o],
             where W_z, W_r, and W_o are weight matrices at update gate, reset gate and output gate.
             The shapes of these matrices are (hidden_size, input_size).
-        b: [numpy.array]
+        b: [numpy.array] | None
             List of biases of the GRU layer. The ordering is [b_z, b_r, b_o],
             where b_z, b_r, b_o are biases at update gate, reset gate and output gate.
-            The shapes of the biases are (hidden_size, ).
-        activation: str
-            Activation function used at the output gate. Can be one of the following option:
-            ['RELU', 'TANH', 'SIGMOID', 'SCALED_TANH', 'SIGMOID_HARD', 'LINEAR'].
-            See add_activation for more detailed description.
-        inner_activation: str
-            Inner activation function used at update and reset gates. Can be one of the following option:
-            ['RELU', 'TANH', 'SIGMOID', 'SCALED_TANH', 'SIGMOID_HARD', 'LINEAR'].
-            See add_activation for more detailed description.
+            If None, biases are ignored. Otherwise the shapes of the biases are (hidden_size, ).
         hidden_size: int
             Number of hidden units. This is equal to the number of channels of output shape.
         input_size: int
             Number of the number of channels of input shape.
-        input_name: str
-            The input blob name of this layer.
-        output_name: str
-            The output blob name of this layer.
+        activation: str
+            Activation function used at the output gate. Can be one of the following option:
+            ['RELU', 'TANH', 'SIGMOID', 'SCALED_TANH', 'SIGMOID_HARD', 'LINEAR'].
+            Defaults to 'TANH'. 
+            See add_activation for more detailed description.
+        inner_activation: str
+            Inner activation function used at update and reset gates. Can be one of the following option:
+            ['RELU', 'TANH', 'SIGMOID', 'SCALED_TANH', 'SIGMOID_HARD', 'LINEAR'].
+            Defaults to 'SIGMOID_HARD'.
+            See add_activation for more detailed description.
+        input_names: [str]
+            The input blob name list of this layer, in the order of [x, h_input].
+        output_names: [str]
+            The output blob name list of this layer, in the order of [y, h_output].
         output_all: boolean
             Whether the recurrent layer should output at every time step.
+
             - If False, the output is the result after the final state update.
             - If True, the output is a sequence, containing outputs at all time steps.
         reverse_input: boolean
             Whether the recurrent layer should process the input sequence in the reverse order.
+
             - If False, the input sequence order is not reversed.
             - If True, the input sequence order is reversed.
 
         See Also
         --------
-        add_activation, add_vanilla_rnn, add_unilstm, add_bidirlstm
+        add_activation, add_simple_rnn, add_unilstm, add_bidirlstm
         """
         spec = self.spec
         nn_spec = self.nn_spec
@@ -1110,7 +1168,7 @@ class NeuralNetworkBuilder(object):
         # set the parameters
         spec_layer_params.inputVectorSize = input_size
         spec_layer_params.outputVectorSize = hidden_size
-        if b is not None and b.any():
+        if b is not None:
             spec_layer_params.hasBiasVectors = True
         spec_layer_params.sequenceOutput = output_all
         spec_layer_params.reverseInput = reverse_input
@@ -1121,25 +1179,27 @@ class NeuralNetworkBuilder(object):
         _set_recurrent_activation(activation_g, activation)
 
         # Write the weights
-        spec_layer_params.updateGateWeightMatrix.floatValue.extend(map(float, W_x[0,0, 0 * hidden_size:1 * hidden_size,:].flatten()))
-        spec_layer_params.resetGateWeightMatrix.floatValue.extend(map(float, W_x[0, 0, 1 * hidden_size:2 * hidden_size, :].flatten()))
-        spec_layer_params.outputGateWeightMatrix.floatValue.extend(map(float, W_x[0, 0, 2 * hidden_size:3 * hidden_size, :].flatten()))
+        R_z, R_r, R_o = W_h
+        W_z, W_r, W_o = W_x
+        
+        spec_layer_params.updateGateWeightMatrix.floatValue.extend(map(float, W_z.flatten()))
+        spec_layer_params.resetGateWeightMatrix.floatValue.extend(map(float, W_r.flatten()))
+        spec_layer_params.outputGateWeightMatrix.floatValue.extend(map(float, W_o.flatten()))
 
-        spec_layer_params.updateGateRecursionMatrix.floatValue.extend(map(float, W_h[0, 0, 0 * hidden_size:1 * hidden_size, :].flatten()))
-        spec_layer_params.resetGateRecursionMatrix.floatValue.extend(map(float, W_h[0, 0, 1 * hidden_size:2 * hidden_size, :].flatten()))
-        spec_layer_params.outputGateRecursionMatrix.floatValue.extend(map(float, W_h[0, 0, 2 * hidden_size:3 * hidden_size, :].flatten()))
+        spec_layer_params.updateGateRecursionMatrix.floatValue.extend(map(float, R_z.flatten()))
+        spec_layer_params.resetGateRecursionMatrix.floatValue.extend(map(float, R_r.flatten()))
+        spec_layer_params.outputGateRecursionMatrix.floatValue.extend(map(float, R_o.flatten()))
 
-        if b is not None and b.any():
-            spec_layer_params.updateGateBiasVector.floatValue.extend(map(float, b[0 * hidden_size:1 * hidden_size].flatten()))
-            spec_layer_params.resetGateBiasVector.floatValue.extend(map(float, b[1 * hidden_size:2 * hidden_size].flatten()))
-            spec_layer_params.outputGateBiasVector.floatValue.extend(map(float, b[2 * hidden_size:3 * hidden_size].flatten()))
+        if b is not None:
+            b_z, b_r, b_o = b
+            spec_layer_params.updateGateBiasVector.floatValue.extend(map(float, b_z.flatten()))
+            spec_layer_params.resetGateBiasVector.floatValue.extend(map(float, b_r.flatten()))
+            spec_layer_params.outputGateBiasVector.floatValue.extend(map(float, b_o.flatten()))
 
-    def add_unilstm(self, name, hidden_size, input_size, input_names, output_names,
-                    W_h, W_x,
+    def add_unilstm(self, name, W_h, W_x, b, hidden_size, input_size, input_names, output_names,
                     inner_activation = 'SIGMOID',
                     cell_state_update_activation = 'TANH',
                     output_activation = 'TANH',
-                    b = None,
                     peep = None,
                     output_all = False,
                     forget_bias = False, coupled_input_forget_gate = False,
@@ -1151,14 +1211,6 @@ class NeuralNetworkBuilder(object):
         ----------
         name: str
             The name of this layer.
-        hidden_size: int
-            Number of hidden units. This is equal to the number of channels of output shape.
-        input_size: int
-            Number of the number of channels of input shape.
-        input_name: str
-            The input blob name of this layer.
-        output_name: str
-            The output blob name of this layer.
         W_h: [numpy.array]
             List of recursion weight matrices. The ordering is [R_i, R_f, R_z, R_o],
             where R_i, R_f, R_z, R_o are weight matrices at input gate, forget gate, cell gate and output gate.
@@ -1167,10 +1219,18 @@ class NeuralNetworkBuilder(object):
             List of input weight matrices. The ordering is [W_i, W_f, W_z, W_o],
             where W_i, W_f, W_z, W_o are weight matrices at input gate, forget gate, cell gate and output gate.
             The shapes of these matrices are (hidden_size, input_size).
-        b: [numpy.array]
+        b: [numpy.array] | None
             List of biases. The ordering is [b_i, b_f, b_z, b_o],
             where b_i, b_f, b_z, b_o are biases at input gate, forget gate, cell gate and output gate.
-            The shapes of the biases (hidden_size).
+            If None, biases are ignored. Otherwise the shapes of the biases are (hidden_size, ).
+        hidden_size: int
+            Number of hidden units. This is equal to the number of channels of output shape.
+        input_size: int
+            Number of the number of channels of input shape.
+        input_names: [str]
+            The input blob name list of this layer, in the order of [x, h_input, c_input].
+        output_names: [str]
+            The output blob name list of this layer, in the order of [y, h_output, c_output].
         inner_activation: str
             Inner activation function used at input and forget gate. Can be one of the following option:
             ['RELU', 'TANH', 'SIGMOID', 'SCALED_TANH', 'SIGMOID_HARD', 'LINEAR'].
@@ -1186,23 +1246,26 @@ class NeuralNetworkBuilder(object):
             The shapes of the peephole vectors are (hidden_size,).
         output_all: boolean
             Whether the LSTM layer should output at every time step.
+
             - If False, the output is the result after the final state update.
             - If True, the output is a sequence, containing outputs at all time steps.
+
         forget_bias: boolean
             If True, a vector of 1s is added to forget gate bias.
-        coupled_input_forget_gate : boolean
+        coupled_input_forget_gate: boolean
             If True, the inpute gate and forget gate is coupled. i.e. forget gate is not used.
-        cell_clip_threshold : float
+        cell_clip_threshold: float
             The limit on the maximum and minimum values on the cell state.
             If not provided, it is defaulted to 50.0.
         reverse_input: boolean
             Whether the LSTM layer should process the input sequence in the reverse order.
+
             - If False, the input sequence order is not reversed.
             - If True, the input sequence order is reversed.
 
         See Also
         --------
-        add_activation, add_vanilla_rnn, add_gru, add_bidirlstm
+        add_activation, add_simple_rnn, add_gru, add_bidirlstm
         """
         spec = self.spec
         nn_spec = self.nn_spec
@@ -1223,9 +1286,9 @@ class NeuralNetworkBuilder(object):
         spec_layer_params.outputVectorSize = hidden_size
         params.sequenceOutput = output_all
         params.forgetBias = False
-        if b is not None and b.any():
+        if b is not None:
             params.hasBiasVectors = True
-        if peep is not None and peep.any():
+        if peep is not None:
             params.hasPeepholeVectors = True
         params.coupledInputAndForgetGate = coupled_input_forget_gate
         params.cellClipThreshold = cell_clip_threshold
@@ -1241,33 +1304,37 @@ class NeuralNetworkBuilder(object):
         _set_recurrent_activation(activation_h, output_activation)
 
         # Write the weights
-        weight_params.inputGateWeightMatrix.floatValue.extend(map(float, W_x[0, 0, 0 * hidden_size:1 * hidden_size, :].flatten()))
-        weight_params.forgetGateWeightMatrix.floatValue.extend(map(float, W_x[0, 0, 1 * hidden_size:2 * hidden_size, :].flatten()))
-        weight_params.outputGateWeightMatrix.floatValue.extend(map(float, W_x[0, 0, 2 * hidden_size:3 * hidden_size, :].flatten()))
-        weight_params.blockInputWeightMatrix.floatValue.extend(map(float, W_x[0, 0, 3 * hidden_size:4 * hidden_size, :].flatten()))
+        R_i, R_f, R_z, R_o = W_h
+        W_i, W_f, W_z, W_o = W_x
+        
+        weight_params.inputGateWeightMatrix.floatValue.extend(map(float, W_i.flatten()))
+        weight_params.forgetGateWeightMatrix.floatValue.extend(map(float, W_f.flatten()))
+        weight_params.outputGateWeightMatrix.floatValue.extend(map(float, W_z.flatten()))
+        weight_params.blockInputWeightMatrix.floatValue.extend(map(float, W_o.flatten()))
 
-        weight_params.inputGateRecursionMatrix.floatValue.extend(map(float, W_h[0, 0, 0 * hidden_size:1 * hidden_size, :].flatten()))
-        weight_params.forgetGateRecursionMatrix.floatValue.extend(map(float, W_h[0, 0, 1 * hidden_size:2 * hidden_size, :].flatten()))
-        weight_params.outputGateRecursionMatrix.floatValue.extend(map(float, W_h[0, 0, 2 * hidden_size:3 * hidden_size, :].flatten()))
-        weight_params.blockInputRecursionMatrix.floatValue.extend(map(float, W_h[0, 0, 3 * hidden_size:4 * hidden_size, :].flatten()))
+        weight_params.inputGateRecursionMatrix.floatValue.extend(map(float, R_i.flatten()))
+        weight_params.forgetGateRecursionMatrix.floatValue.extend(map(float, R_f.flatten()))
+        weight_params.outputGateRecursionMatrix.floatValue.extend(map(float, R_z.flatten()))
+        weight_params.blockInputRecursionMatrix.floatValue.extend(map(float, R_o.flatten()))
 
-        if b is not None and b.any():
-            weight_params.inputGateBiasVector.floatValue.extend(map(float, b[0 * hidden_size:1 * hidden_size].flatten()))
-            weight_params.forgetGateBiasVector.floatValue.extend(map(float, b[1 * hidden_size:2 * hidden_size].flatten()))
-            weight_params.outputGateBiasVector.floatValue.extend(map(float, b[2 * hidden_size:3 * hidden_size].flatten()))
-            weight_params.blockInputBiasVector.floatValue.extend(map(float, b[3 * hidden_size:4 * hidden_size].flatten()))
+        if b is not None:
+            b_i, b_f, b_z, b_o = b
+            weight_params.inputGateBiasVector.floatValue.extend(map(float, b_i.flatten()))
+            weight_params.forgetGateBiasVector.floatValue.extend(map(float, b_f.flatten()))
+            weight_params.outputGateBiasVector.floatValue.extend(map(float, b_z.flatten()))
+            weight_params.blockInputBiasVector.floatValue.extend(map(float, b_o.flatten()))
 
-        if peep is not None and peep.any():
-            weight_params.inputGatePeepholeVector.floatValue.extend(map(float, peep[0 * hidden_size:1 * hidden_size].flatten()))
-            weight_params.forgetGatePeepholeVector.floatValue.extend(map(float, peep[1 * hidden_size:2 * hidden_size].flatten()))
-            weight_params.outputGatePeepholeVector.floatValue.extend(map(float, peep[2 * hidden_size:3 * hidden_size].flatten()))
+        if peep is not None:
+            p_i, p_f, p_o = peep
+            weight_params.inputGatePeepholeVector.floatValue.extend(map(float, p_i.flatten()))
+            weight_params.forgetGatePeepholeVector.floatValue.extend(map(float, p_f.flatten()))
+            weight_params.outputGatePeepholeVector.floatValue.extend(map(float, p_o.flatten()))
 
-    def add_bidirlstm(self, name, hidden_size, input_size, input_names, output_names,
-            W_h, W_x, W_h_back, W_x_back,
+    def add_bidirlstm(self, name, W_h, W_x, b, W_h_back, W_x_back, b_back, hidden_size, input_size, 
+            input_names, output_names,
             inner_activation = 'SIGMOID',
             cell_state_update_activation = 'TANH',
             output_activation = 'TANH',
-            b = None, b_back = None,
             peep = None, peep_back = None,
             output_all = False,
             forget_bias = False, coupled_input_forget_gate= False, cell_clip_threshold = 50.0):
@@ -1279,14 +1346,6 @@ class NeuralNetworkBuilder(object):
         ----------
         name: str
             The name of this layer.
-        hidden_size: int
-            Number of hidden units. This is equal to the number of channels of output shape.
-        input_size: int
-            Number of the number of channels of input shape.
-        input_name: str
-            The input blob name of this layer.
-        output_name: str
-            The output blob name of this layer.
         W_h: [numpy.array]
             List of recursion weight matrices for the forward layer. The ordering is [R_i, R_f, R_z, R_o],
             where R_i, R_f, R_z, R_o are weight matrices at input gate, forget gate, cell gate and output gate.
@@ -1295,6 +1354,10 @@ class NeuralNetworkBuilder(object):
             List of input weight matrices for the forward layer. The ordering is [W_i, W_f, W_z, W_o],
             where W_i, W_f, W_z, W_o are weight matrices at input gate, forget gate, cell gate and output gate.
             The shapes of these matrices are (hidden_size, input_size).
+        b: [numpy.array]
+            List of biases for the forward layer. The ordering is [b_i, b_f, b_z, b_o],
+            where b_i, b_f, b_z, b_o are biases at input gate, forget gate, cell gate and output gate.
+            If None, biases are ignored. Otherwise the shapes of the biases are (hidden_size, ).
         W_h_back: [numpy.array]
             List of recursion weight matrices for the backward layer. The ordering is [R_i, R_f, R_z, R_o],
             where R_i, R_f, R_z, R_o are weight matrices at input gate, forget gate, cell gate and output gate.
@@ -1303,46 +1366,56 @@ class NeuralNetworkBuilder(object):
             List of input weight matrices for the backward layer. The ordering is [W_i, W_f, W_z, W_o],
             where W_i, W_f, W_z, W_o are weight matrices at input gate, forget gate, cell gate and output gate.
             The shapes of these matrices are (hidden_size, input_size).
-        inner_activation: str
-            Inner activation function used at input and forget gate. Can be one of the following option:
-            ['RELU', 'TANH', 'SIGMOID', 'SCALED_TANH', 'SIGMOID_HARD', 'LINEAR'].
-        cell_state_update_activation: str
-            Cell state update activation function used at the cell state update gate.
-            ['RELU', 'TANH', 'SIGMOID', 'SCALED_TANH', 'SIGMOID_HARD', 'LINEAR'].
-        output_activation: str
-            Activation function used at the output gate. Can be one of the following option:
-            ['RELU', 'TANH', 'SIGMOID', 'SCALED_TANH', 'SIGMOID_HARD', 'LINEAR'].
-        b: [numpy.array]
-            List of biases for the forward layer. The ordering is [b_i, b_f, b_z, b_o],
-            where b_i, b_f, b_z, b_o are biases at input gate, forget gate, cell gate and output gate.
-            The shapes of the biases (hidden_size).
         b_back: [numpy.array]
             List of biases for the backward layer. The ordering is [b_i, b_f, b_z, b_o],
             where b_i, b_f, b_z, b_o are biases at input gate, forget gate, cell gate and output gate.
             The shapes of the biases (hidden_size).
+        hidden_size: int
+            Number of hidden units. This is equal to the number of channels of output shape.
+        input_size: int
+            Number of the number of channels of input shape.
+        input_names: [str]
+            The input blob name list of this layer, in the order of [x, h_input, c_input, h_reverse_input, c_reverse_input].
+        output_names: [str]
+            The output blob name list of this layer, in the order of [y, h_output, c_output, h_reverse_output, c_reverse_output].
+        inner_activation: str
+            Inner activation function used at input and forget gate. Can be one of the following option:
+            ['RELU', 'TANH', 'SIGMOID', 'SCALED_TANH', 'SIGMOID_HARD', 'LINEAR'].
+            Defaults to 'SIGMOID'. 
+        cell_state_update_activation: str
+            Cell state update activation function used at the cell state update gate.
+            ['RELU', 'TANH', 'SIGMOID', 'SCALED_TANH', 'SIGMOID_HARD', 'LINEAR'].
+            Defaults to 'TANH'.
+        output_activation: str
+            Activation function used at the output gate. Can be one of the following option:
+            ['RELU', 'TANH', 'SIGMOID', 'SCALED_TANH', 'SIGMOID_HARD', 'LINEAR'].
+            Defaults to 'TANH'.
         peep: [numpy.array] | None
             List of peephole vectors for the forward layer. The ordering is [p_i, p_f, p_o],
             where p_i, p_f, and p_o are peephole vectors at input gate, forget gate, output gate.
-            The shapes of the peephole vectors are (hidden_size,).
+            The shapes of the peephole vectors are (hidden_size,). Defaults to None.
         peep_back: [numpy.array] | None
             List of peephole vectors for the backward layer. The ordering is [p_i, p_f, p_o],
             where p_i, p_f, and p_o are peephole vectors at input gate, forget gate, output gate.
-            The shapes of the peephole vectors are (hidden_size,).
+            The shapes of the peephole vectors are (hidden_size,). Defaults to None.
         output_all: boolean
-            Whether the LSTM layer should output at every time step.
+            Whether the LSTM layer should output at every time step. Defaults to False.
+
             - If False, the output is the result after the final state update.
             - If True, the output is a sequence, containing outputs at all time steps.
+
         forget_bias: boolean
-            If True, a vector of 1s is added to forget gate bias.
+            If True, a vector of 1s is added to forget gate bias. Defaults to False.
         coupled_input_forget_gate : boolean
             If True, the inpute gate and forget gate is coupled. i.e. forget gate is not used.
+            Defaults to False.
         cell_clip_threshold : float
             The limit on the maximum and minimum values on the cell state.
-            If not provided, it is defaulted to 50.0.
+            Defaults to 50.0.
 
         See Also
         --------
-        add_activation, add_vanilla_rnn, add_unilstm, add_bidirlstm
+        add_activation, add_simple_rnn, add_unilstm, add_bidirlstm
         """
 
         spec = self.spec
@@ -1363,11 +1436,11 @@ class NeuralNetworkBuilder(object):
         # set the parameters
         spec_layer_params.inputVectorSize = input_size
         spec_layer_params.outputVectorSize = hidden_size
-        if b is not None and b.any():
+        if b is not None:
             params.hasBiasVectors = True
         params.sequenceOutput = output_all
         params.forgetBias = forget_bias
-        if peep is not None and peep.any():
+        if peep is not None:
             params.hasPeepholeVectors = True
         params.coupledInputAndForgetGate = coupled_input_forget_gate
         params.cellClipThreshold = cell_clip_threshold
@@ -1389,52 +1462,60 @@ class NeuralNetworkBuilder(object):
 
 
         # Write the forward lstm weights
-        weight_params.inputGateWeightMatrix.floatValue.extend(map(float, W_x[0, 0, 0 * hidden_size:1 * hidden_size, :].flatten()))
-        weight_params.forgetGateWeightMatrix.floatValue.extend(map(float, W_x[0, 0, 1 * hidden_size:2 * hidden_size, :].flatten()))
-        weight_params.outputGateWeightMatrix.floatValue.extend(map(float, W_x[0, 0, 2 * hidden_size:3 * hidden_size, :].flatten()))
-        weight_params.blockInputWeightMatrix.floatValue.extend(map(float, W_x[0, 0, 3 * hidden_size:4 * hidden_size, :].flatten()))
+        R_i, R_f, R_z, R_o = W_h
+        W_i, W_f, W_z, W_o = W_x
+        
+        weight_params.inputGateWeightMatrix.floatValue.extend(map(float, W_i.flatten()))
+        weight_params.forgetGateWeightMatrix.floatValue.extend(map(float, W_f.flatten()))
+        weight_params.outputGateWeightMatrix.floatValue.extend(map(float, W_z.flatten()))
+        weight_params.blockInputWeightMatrix.floatValue.extend(map(float, W_o.flatten()))
 
-        weight_params.inputGateRecursionMatrix.floatValue.extend(map(float, W_h[0, 0, 0 * hidden_size:1 * hidden_size, :].flatten()))
-        weight_params.forgetGateRecursionMatrix.floatValue.extend(map(float, W_h[0, 0, 1 * hidden_size:2 * hidden_size, :].flatten()))
-        weight_params.outputGateRecursionMatrix.floatValue.extend(map(float, W_h[0, 0, 2 * hidden_size:3 * hidden_size, :].flatten()))
-        weight_params.blockInputRecursionMatrix.floatValue.extend(map(float, W_h[0, 0, 3 * hidden_size:4 * hidden_size, :].flatten()))
+        weight_params.inputGateRecursionMatrix.floatValue.extend(map(float, R_i.flatten()))
+        weight_params.forgetGateRecursionMatrix.floatValue.extend(map(float, R_f.flatten()))
+        weight_params.outputGateRecursionMatrix.floatValue.extend(map(float, R_z.flatten()))
+        weight_params.blockInputRecursionMatrix.floatValue.extend(map(float, R_o.flatten()))
 
-        if b is not None and b.any():
-            weight_params.inputGateBiasVector.floatValue.extend(map(float, b[0 * hidden_size:1 * hidden_size].flatten()))
-            weight_params.forgetGateBiasVector.floatValue.extend(map(float, b[1 * hidden_size:2 * hidden_size].flatten()))
-            weight_params.outputGateBiasVector.floatValue.extend(map(float, b[2 * hidden_size:3 * hidden_size].flatten()))
-            weight_params.blockInputBiasVector.floatValue.extend(map(float, b[3 * hidden_size:4 * hidden_size].flatten()))
+        if b is not None:
+            b_i, b_f, b_z, b_o = b
+            weight_params.inputGateBiasVector.floatValue.extend(map(float, b_i.flatten()))
+            weight_params.forgetGateBiasVector.floatValue.extend(map(float, b_f.flatten()))
+            weight_params.outputGateBiasVector.floatValue.extend(map(float, b_z.flatten()))
+            weight_params.blockInputBiasVector.floatValue.extend(map(float, b_o.flatten()))
 
-        if peep is not None and peep.any():
-            weight_params.inputGatePeepholeVector.floatValue.extend(map(float, peep[0 * hidden_size:1 * hidden_size].flatten()))
-            weight_params.forgetGatePeepholeVector.floatValue.extend(map(float, peep[1 * hidden_size:2 * hidden_size].flatten()))
-            weight_params.outputGatePeepholeVector.floatValue.extend(map(float, peep[2 * hidden_size:3 * hidden_size].flatten()))
-
+        if peep is not None:
+            p_i, p_f, p_o = peep
+            weight_params.inputGatePeepholeVector.floatValue.extend(map(float, p_i.flatten()))
+            weight_params.forgetGatePeepholeVector.floatValue.extend(map(float, p_f.flatten()))
+            weight_params.outputGatePeepholeVector.floatValue.extend(map(float, p_o.flatten()))
 
         # Write the backward lstm weights
-        weight_params_back.inputGateWeightMatrix.floatValue.extend(map(float, W_x_back[0, 0, 0 * hidden_size:1 * hidden_size, :].flatten()))
-        weight_params_back.forgetGateWeightMatrix.floatValue.extend(map(float, W_x_back[0, 0, 1 * hidden_size:2 * hidden_size, :].flatten()))
-        weight_params_back.outputGateWeightMatrix.floatValue.extend(map(float, W_x_back[0, 0, 2 * hidden_size:3 * hidden_size, :].flatten()))
-        weight_params_back.blockInputWeightMatrix.floatValue.extend(map(float, W_x_back[0, 0, 3 * hidden_size:4 * hidden_size, :].flatten()))
+        R_i, R_f, R_z, R_o = W_h_back
+        W_i, W_f, W_z, W_o = W_x_back
+        
+        weight_params_back.inputGateWeightMatrix.floatValue.extend(map(float, W_i.flatten()))
+        weight_params_back.forgetGateWeightMatrix.floatValue.extend(map(float, W_f.flatten()))
+        weight_params_back.outputGateWeightMatrix.floatValue.extend(map(float, W_z.flatten()))
+        weight_params_back.blockInputWeightMatrix.floatValue.extend(map(float, W_o.flatten()))
 
-        weight_params_back.inputGateRecursionMatrix.floatValue.extend(map(float, W_h_back[0, 0, 0 * hidden_size:1 * hidden_size, :].flatten()))
-        weight_params_back.forgetGateRecursionMatrix.floatValue.extend(map(float, W_h_back[0, 0, 1 * hidden_size:2 * hidden_size, :].flatten()))
-        weight_params_back.outputGateRecursionMatrix.floatValue.extend(map(float, W_h_back[0, 0, 2 * hidden_size:3 * hidden_size, :].flatten()))
-        weight_params_back.blockInputRecursionMatrix.floatValue.extend(map(float, W_h_back[0, 0, 3 * hidden_size:4 * hidden_size, :].flatten()))
+        weight_params_back.inputGateRecursionMatrix.floatValue.extend(map(float, R_i.flatten()))
+        weight_params_back.forgetGateRecursionMatrix.floatValue.extend(map(float, R_f.flatten()))
+        weight_params_back.outputGateRecursionMatrix.floatValue.extend(map(float, R_z.flatten()))
+        weight_params_back.blockInputRecursionMatrix.floatValue.extend(map(float, R_o.flatten()))
 
-        if b is not None and b.any():
-            weight_params_back.inputGateBiasVector.floatValue.extend(map(float, b_back[0 * hidden_size:1 * hidden_size].flatten()))
-            weight_params_back.forgetGateBiasVector.floatValue.extend(map(float, b_back[1 * hidden_size:2 * hidden_size].flatten()))
-            weight_params_back.outputGateBiasVector.floatValue.extend(map(float, b_back[2 * hidden_size:3 * hidden_size].flatten()))
-            weight_params_back.blockInputBiasVector.floatValue.extend(map(float, b_back[3 * hidden_size:4 * hidden_size].flatten()))
+        if b_back is not None:
+            b_i, b_f, b_z, b_o = b_back
+            weight_params_back.inputGateBiasVector.floatValue.extend(map(float, b_i.flatten()))
+            weight_params_back.forgetGateBiasVector.floatValue.extend(map(float, b_f.flatten()))
+            weight_params_back.outputGateBiasVector.floatValue.extend(map(float, b_z.flatten()))
+            weight_params_back.blockInputBiasVector.floatValue.extend(map(float, b_o.flatten()))
 
-        if peep_back is not None and peep_back.any():
-            weight_params_back.inputGatePeepholeVector.floatValue.extend(map(float, peep_back[0 * hidden_size:1 * hidden_size].flatten()))
-            weight_params_back.forgetGatePeepholeVector.floatValue.extend(map(float, peep_back[1 * hidden_size:2 * hidden_size].flatten()))
-            weight_params_back.outputGatePeepholeVector.floatValue.extend(map(float, peep_back[2 * hidden_size:3 * hidden_size].flatten()))
+        if peep_back is not None:
+            p_i, p_f, p_o = peep_back
+            weight_params_back.inputGatePeepholeVector.floatValue.extend(map(float, p_i.flatten()))
+            weight_params_back.forgetGatePeepholeVector.floatValue.extend(map(float, p_f.flatten()))
+            weight_params_back.outputGatePeepholeVector.floatValue.extend(map(float, p_o.flatten()))
 
-
-    def add_flatten(self, mode, name, input_name, output_name):
+    def add_flatten(self, name, mode, input_name, output_name):
         """
         Add a flatten layer.
 
@@ -1443,8 +1524,10 @@ class NeuralNetworkBuilder(object):
         name: str
             The name of this layer.
         mode: int
-            If mode == 0, the flatten layer is in CHANNEL_FIRST mode.
-            If mode == 1, the flatten layer is in CHANNEL_LAST mode.
+
+            - If mode == 0, the flatten layer is in CHANNEL_FIRST mode.
+            - If mode == 1, the flatten layer is in CHANNEL_LAST mode.
+
         input_name: str
             The input blob name of this layer.
         output_name: str
@@ -1476,10 +1559,13 @@ class NeuralNetworkBuilder(object):
                 'Unknown flatten mode %d ' % mode)
 
     def add_batchnorm(self, name, channels, gamma, beta, mean, variance, input_name,
-                      output_name, epsilon = 1e-5, computeMeanVar = False, instanceNormalization = False):
+                      output_name, epsilon = 1e-5):
+
         """
         Add a Batch Normalization layer. Batch Normalization operation is
-        defined as: y = gamma * (x - mean) / sqrt(variance + epsilon) + beta
+        defined as: 
+
+        `y = gamma * (x - mean) / sqrt(variance + epsilon) + beta`
 
         Parameters
         ----------
@@ -1501,20 +1587,6 @@ class NeuralNetworkBuilder(object):
             The output blob name of this layer.
         epsilon: float
             Value of epsilon. Defaults to 1e-5 if not specified.
-        computeMeanVar: boolean
-            Defaults to False.
-
-            - If True, the mean and variance of input blob is computed on the
-              fly, and parameters mean and variance are ignored.
-            - If False, the mean and variance of input blob is set to provided
-              values of mean and variance, and the parameter
-              instanceNormalization is ignored.
-
-        instanceNormalization: boolean
-            When computeMeanVar is False, this flag is ignored.
-
-            - If True, the mean and variance of input blob is computed for every single input instance.
-            - If False, the mean and variance is computed for the whole batch.
 
         See Also
         --------
@@ -1539,11 +1611,11 @@ class NeuralNetworkBuilder(object):
         spec_layer_params.mean.floatValue.extend(map(float, mean.flatten()))
         spec_layer_params.variance.floatValue.extend(map(float, variance.flatten()))
         spec_layer_params.epsilon = epsilon
-        spec_layer_params.computeMeanVar = computeMeanVar
-        spec_layer_params.instanceNormalization = instanceNormalization
+        spec_layer_params.computeMeanVar = False
+        spec_layer_params.instanceNormalization = False
 
 
-    def add_permute(self, name, input_name, output_name, dim):
+    def add_permute(self, name, dim, input_name, output_name):
         """
         Add a permute layer.
 
@@ -1551,13 +1623,13 @@ class NeuralNetworkBuilder(object):
         ----------
         name: str
             The name of this layer.
+        dim: tuple
+            Dimension of the output blob. The product of dim must be equal to
+            the shape of the input blob.
         input_name: str
             The input blob name of this layer.
         output_name: str
             The output blob name of this layer.
-        dim: tuple
-            Dimension of the output blob. The product of dim must be equal to
-            the shape of the input blob.
 
         See Also
         --------
@@ -1583,16 +1655,18 @@ class NeuralNetworkBuilder(object):
         ----------
         name: str
             The name of this layer.
-        input_name: str
-            The input blob name of this layer.
-        output_name: str
-            The output blob name of this layer.
         target_shape: tuple
             Shape of the output blob. The product of target_shape must be equal
             to the shape of the input blob.
         mode: int
+
             - If mode == 0, the reshape layer is in CHANNEL_FIRST mode.
             - If mode == 1, the reshape layer is in CHANNEL_LAST mode.
+
+        input_name: str
+            The input blob name of this layer.
+        output_name: str
+            The output blob name of this layer.
 
         See Also
         --------
@@ -1617,11 +1691,6 @@ class NeuralNetworkBuilder(object):
             spec_layer_params.mode = \
                     _NeuralNetwork_pb2.ReshapeLayerParams.ReshapeOrder.Value('CHANNEL_LAST')
 
-
-    def add_dropout(self, name, input_name, output_name):
-        pass
-
-
     def set_pre_processing_parameters(self, image_input_names = [], is_bgr = False,
             red_bias = 0.0, green_bias = 0.0, blue_bias = 0.0, gray_bias = 0.0, image_scale = 1.0):
         """Add pre-processing parameters to the neural network object
@@ -1631,7 +1700,7 @@ class NeuralNetworkBuilder(object):
         image_input_names: [str]
             Name if input blobs that are images
 
-        is_bgr: bool
+        is_bgr: boolean
             Image pixel order (RGB or BGR)
 
         red_bias: float
